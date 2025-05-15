@@ -1,0 +1,7 @@
+DatabricksJobs
+| where TimeGenerated > ago(5m)
+| where operation_name contains "Microsoft.Databricks/jobs/runFailed"
+| extend parsedRequest = parse_json(RequestParams)
+| extend JOB_URL = strcat("https://<joblink>#job/", tostring(parsedRequest.jobId), "/run/", tostring(parsedRequest.multitaskParentId))
+| summarize Count = count() by JOB_URL, bin(TimeGenerated, 5m)
+| project TimeGenerated, JOB_URL, Count
