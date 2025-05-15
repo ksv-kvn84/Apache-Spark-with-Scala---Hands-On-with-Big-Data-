@@ -1,0 +1,22 @@
+def process_city_codes(lines):
+    output_lines = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue  # skip empty lines
+        values = line.split(',')
+        formatted = [f'city-code-{i+1}={value}' for i, value in enumerate(values)]
+        output_lines.append(', '.join(formatted))
+    return output_lines
+
+# Example usage:
+input_lines = [
+    'a1,b2,c3,d4',
+    'x9,y8,z7'
+]
+
+result = process_city_codes(input_lines)
+
+# Print or use the result
+for line in result:
+    print(line)
