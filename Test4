@@ -1,0 +1,66 @@
+parameters:
+- name: env
+  type: string
+
+jobs:
+
+# ─────────────────────
+# Job 1: Terraform Plan
+# ─────────────────────
+- job: TerraformPlan
+  displayName: "Terraform Plan - ${{ parameters.env }}"
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+  - task: AzureCLI@2
+    displayName: 'Terraform Plan'
+    inputs:
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      workingDirectory: '/home/mydir/tf'
+      addSpnToEnvironment: true
+      failOnStandardError: true
+      inlineScript: |
+        echo "### Running Terraform plan for ${{ parameters.env }}"
+        export TF_CLI_CONFIG_FILE=$(Build.SourcesDirectory)/.terraformrc
+        terraform init -backend-config=${{ parameters.env }}.tfvars
+        terraform plan -var-file=${{ parameters.env }}.tfvars -out=tfplan
+        terraform show -no-color tfplan > plan_output.txt
+
+  - publish: /home/mydir/tf/plan_output.txt
+    artifact: terraform-plan-${{ parameters.env }}
+
+# ────────────────────────────────────────
+# Job 2: Manual Approval + Apply (Env Gate)
+# ────────────────────────────────────────
+- job: TerraformApply
+  displayName: "Terraform Apply - ${{ parameters.env }}"
+  dependsOn: TerraformPlan
+  condition: succeeded()
+  environment: tf-${{ parameters.env }}  # e.g., tf-dev, tf-uat, tf-prod
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+  - task: ManualValidation@0
+    inputs:
+      instructions: 'Review Terraform plan and approve to apply.'
+      timeoutInMinutes: 1440
+      onTimeout: 'reject'
+      notifyUsers: |
+        your-team@example.com
+
+  - download: current
+    artifact: terraform-plan-${{ parameters.env }}
+
+  - task: AzureCLI@2
+    displayName: 'Terraform Apply'
+    inputs:
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      workingDirectory: '/home/mydir/tf'
+      addSpnToEnvironment: true
+      failOnStandardError: true
+      inlineScript: |
+        echo "### Applying Terraform plan for ${{ parameters.env }}"
+        export TF_CLI_CONFIG_FILE=$(Build.SourcesDirectory)/.terraformrc
+        terraform apply tfplan
