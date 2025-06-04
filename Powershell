@@ -1,0 +1,10 @@
+$tsvFiles = Get-ChildItem -Path "C:\Path\To\Your\Files" -Filter *.tsv
+foreach ($file in $tsvFiles) {
+    $lineCount = 0
+    $reader = [System.IO.File]::OpenText($file.FullName)
+    while ($reader.ReadLine() -ne $null) {
+        $lineCount++
+    }
+    $reader.Close()
+    Write-Output "$($file.Name): $lineCount lines"
+}
