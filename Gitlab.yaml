@@ -1,0 +1,78 @@
+azure_start_vms_and_call_api:
+  stage: start
+  image: mcr.microsoft.com/azure-cli
+  script:
+    - echo "Environment: $ENV"
+
+    # Map environment to resource group
+    - |
+      case "$ENV" in
+        dev) export RESOURCE_GROUP="rg-dev" ;;
+        uat) export RESOURCE_GROUP="rg-uat" ;;
+        prod) export RESOURCE_GROUP="rg-prod" ;;
+        *) echo "Invalid environment: $ENV" && exit 1 ;;
+      esac
+    - echo "Using Resource Group: $RESOURCE_GROUP"
+
+    # Login to Azure
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
+    - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+
+    # Start VMs
+    - echo "Starting VMs..."
+    - |
+      for vm in $(cat vm_lists/$ENV.txt); do
+        echo "Starting $vm..."
+        az vm start --resource-group "$RESOURCE_GROUP" --name "$vm"
+      done
+
+    # Wait for VMs to be fully running
+    - echo "Waiting for VMs to be fully running..."
+    - |
+      for vm in $(cat vm_lists/$ENV.txt); do
+        echo "Checking status of $vm..."
+        timeout=300
+        elapsed=0
+        while true; do
+          power_state=$(az vm get-instance-view \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$vm" \
+            --query "instanceView.statuses[?starts_with(code,'PowerState/')].code" \
+            -o tsv)
+          
+          echo "$vm status: $power_state"
+          if [[ "$power_state" == "PowerState/running" ]]; then
+            echo "$vm is up."
+            break
+          fi
+          if [[ $elapsed -ge $timeout ]]; then
+            echo "Timeout reached while waiting for $vm to start."
+            exit 1
+          fi
+          sleep 10
+          elapsed=$((elapsed+10))
+        done
+      done
+
+    # Optional: Check SSH or HTTP port availability
+    - echo "Waiting for SSH (port 22) to respond..."
+    - |
+      for vm in $(cat vm_lists/$ENV.txt); do
+        ip=$(az vm show -d -g "$RESOURCE_GROUP" -n "$vm" --query publicIps -o tsv)
+        echo "Checking SSH on $vm ($ip)..."
+        timeout=180
+        elapsed=0
+        while ! nc -z $ip 22; do
+          if [[ $elapsed -ge $timeout ]]; then
+            echo "SSH not responding on $vm after $timeout seconds."
+            exit 1
+          fi
+          sleep 5
+          elapsed=$((elapsed+5))
+        done
+        echo "$vm is responding to SSH."
+      done
+
+    # ✅ All VMs are up — now call the API
+    - echo "All VMs are running and responsive. Calling API..."
+    - curl -X POST https://your.api.endpoint/trigger -H "Authorization: Bearer $API_TOKEN"
