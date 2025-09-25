@@ -1,0 +1,90 @@
+mport sys
+
+# === 🔧 CONFIG: Define your naming logic here
+def get_names_for_env(env: str):
+    env = env.lower()
+
+    # Customize as needed
+    group_name = f"kv-access-group-{env}"
+    vault_name = f"kv-myapp-{env}"
+
+    return group_name, vault_name
+
+# === 📥 Get environment name from ENVIRONMENT variable
+env = os.environ.get("ENVIRONMENT")
+
+if not env:
+    print("❌ ERROR: ENVIRONMENT variable not set.")
+    sys.exit(1)
+
+group_name, vault_name = get_names_for_env(env)
+
+print(f"🌍 Environment: {env}")
+print(f"👥 Group Name: {group_name}")
+print(f"🔐 Key Vault Name: {vault_name}")
+
+# === 🔄 Fetch members of the group
+try:
+    result = subprocess.run(
+        ["az", "ad", "group", "member", "list", "--group", group_name, "--output", "json"],
+        capture_output=True, text=True, check=True
+    )
+except subprocess.CalledProcessError as e:
+    print(f"❌ Failed to fetch members of group '{group_name}'")
+    print(e.stderr)
+    sys.exit(1)
+
+members = json.loads(result.stdout)
+
+# === 🔎 Filter members starting with 'svc_'
+svc_members = [
+    {"id": m["objectId"], "name": m.get("displayName", "<no-name>")}
+    for m in members if m.get("displayName", "").startswith("svc_")
+]
+
+print(f"✅ Found {len(svc_members)} member(s) starting with 'svc_'.")
+
+# === 🔐 Fetch existing access policies
+try:
+    policy_check = subprocess.run(
+        ["az", "keyvault", "show", "--name", vault_name, "--query", "properties.accessPolicies", "--output", "json"],
+        capture_output=True, text=True, check=True
+    )
+except subprocess.CalledProcessError as e:
+    print(f"❌ Failed to fetch access policies for vault '{vault_name}'")
+    print(e.stderr)
+    sys.exit(1)
+
+access_policies = json.loads(policy_check.stdout)
+
+# === 🔁 Assign access to svc_ members if not already assigned
+for member in svc_members:
+    object_id = member["id"]
+    name = member["name"]
+
+    already_assigned = False
+    for policy in access_policies:
+        if policy.get("objectId") == object_id:
+            perms = policy.get("permissions", {}).get("secrets", [])
+            if "get" in perms and "list" in perms:
+                already_assigned = True
+                break
+
+    if already_assigned:
+        print(f"✔️  {name} already has secret permissions. Skipping.")
+        continue
+
+    print(f"🔧 Assigning get/list secret access to: {name} ({object_id})")
+
+    try:
+        subprocess.run([
+            "az", "keyvault", "set-policy",
+            "--name", vault_name,
+            "--object-id", object_id,
+            "--secret-permissions", "get", "list"
+        ], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to assign policy to {name}")
+        print(e.stderr)
+
+print("\n✅ All done.")
