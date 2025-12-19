@@ -1,29 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -z "${KV_NAME:-}" ]]; then
+  echo "ERROR: KV_NAME is not set"
+  exit 1
+fi
+
+# Map: Variable Group name -> AKV secret name
+declare -A VAR_MAP
+VAR_MAP[db_jdbc_url]="db-jdbc-url"
+VAR_MAP[db_scope]="db-scope"
+VAR_MAP[api_key]="api-key"
+VAR_MAP[client_secret]="client-secret"
+
+echo "Pushing secrets to Key Vault: $KV_NAME"
+
+for vg_var in "${!VAR_MAP[@]}"; do
+  value="$(printenv "$vg_var" || true)"
+
+  if [[ -z "$value" ]]; then
+    echo "Skipping $vg_var (empty or not set)"
+    continue
+  fi
+
+  echo "Setting secret: ${VAR_MAP[$vg_var]}"
+  az keyvault secret set \
+    --vault-name "$KV_NAME" \
+    --name "${VAR_MAP[$vg_var]}" \
+    --value "$value" \
+    --only-show-errors
+done
+
+echo "Done."
+
+
+=======
+
+parameters:
+- name: environment
+  type: string
+  default: dev
+  values:
+  - dev
+  - test
+  - prod
+
+variables:
+- ${{ if eq(parameters.environment, 'dev') }}:
+  - group: vg-app-dev
+- ${{ if eq(parameters.environment, 'test') }}:
+  - group: vg-app-test
+- ${{ if eq(parameters.environment, 'prod') }}:
+  - group: vg-app-prod
+
 steps:
 - task: AzureCLI@2
-  displayName: Push vars to AKV
+  displayName: Push Variable Group to AKV
   inputs:
     azureSubscription: 'my-azure-service-connection'
     scriptType: bash
-    scriptLocation: inlineScript
-    inlineScript: |
-      set -e
-
-      KV_NAME="my-kv-${{ parameters.environment }}"
-
-      declare -A VAR_MAP
-      VAR_MAP[db_jdbc_url]="db-jdbc-url"
-      VAR_MAP[db_scope]="db-scope"
-      VAR_MAP[api_key]="api-key"
-      VAR_MAP[client_secret]="client-secret"
-
-      for vg_var in "${!VAR_MAP[@]}"; do
-        echo "Pushing $vg_var -> ${VAR_MAP[$vg_var]}"
-        az keyvault secret set \
-          --vault-name "$KV_NAME" \
-          --name "${VAR_MAP[$vg_var]}" \
-          --value "$(printenv $vg_var)"
-      done
+    scriptLocation: scriptPath
+    scriptPath: scripts/push-vars-to-akv.sh
   env:
+    KV_NAME: my-kv-${{ parameters.environment }}
+
+    # Explicitly expose VG variables
     db_jdbc_url: $(db_jdbc_url)
     db_scope: $(db_scope)
     api_key: $(api_key)
