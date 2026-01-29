@@ -1,0 +1,30 @@
+import requests
+import time
+
+DATABRICKS_INSTANCE = "https://<your-workspace-url>"
+TOKEN = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
+
+headers = {
+    "Authorization": f"Bearer {TOKEN}"
+}
+
+url = f"{DATABRICKS_INSTANCE}/api/2.1/jobs/runs/list"
+
+response = requests.get(url, headers=headers)
+
+runs = response.json()["runs"]
+
+job_runs = []
+
+for run in runs:
+    job_id = run.get("job_id")
+    run_id = run.get("run_id")
+    start = run.get("start_time")
+    end = run.get("end_time")
+
+    if start and end:
+        duration_hours = (end - start) / (1000 * 60 * 60)
+
+        job_runs.append((job_id, run_id, duration_hours))
+
+display(job_runs)
