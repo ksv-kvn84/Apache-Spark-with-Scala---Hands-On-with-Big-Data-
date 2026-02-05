@@ -2,44 +2,27 @@
 
 # 1. Define your Subscription ID
 SUB_ID="your-subscription-id-here"
-
-echo "Switching to subscription: $SUB_ID..."
 az account set --subscription "$SUB_ID"
 
 # 2. Get all storage account IDs
 ids=$(az storage account list --query "[].id" -o tsv)
 
-echo "--------------------------------------------------------"
-echo "SECTION 1: DAILY GROWTH (LAST 30 DAYS)"
 echo -e "AccountName\tDate\tUsage_GB"
-echo "--------------------------------------------------------"
 
 for id in $ids
 do
+    # Extract name for the display
     accountName=$(echo $id | awk -F'/' '{print $NF}')
     
-    # Calculate 30 days ago in ISO8601 format
+    # 3. Use the full $id variable for the --resource flag
+    # This avoids the "Resource Name/Type/Namespace" error
     START_DATE=$(date -u -d "30 days ago" +%Y-%m-%dT00:00:00Z)
 
-    # Pull metrics, then use 'awk' to convert Bytes to GB (Bytes / 1024^3)
     az monitor metrics list \
         --resource "$id" \
         --metric "UsedCapacity" \
         --interval "PT24H" \
         --start-time "$START_DATE" \
         --query "value[0].timeseries[0].data[].{Date:timeStamp, Usage:average}" \
-        -o tsv | awk -v acc="$accountName" '{printf "%s\t%s\t%.2f\n", acc, $1, $2/1073741824}'
+        -o tsv | awk -v acc="$accountName" '$2 != "" {printf "%s\t%s\t%.2f\n", acc, $1, $2/1073741824}'
 done
-
-echo ""
-echo "--------------------------------------------------------"
-echo "SECTION 2: MONTHLY/YEARLY TREND (LAST 12 MONTHS)"
-echo -e "AccountName\tMonth\tAvg_Monthly_GB"
-echo "--------------------------------------------------------"
-
-# Pulls usage quantity (GB) from billing records
-az consumption usage list \
-    --start-date $(date -u -d "1 year ago" +%Y-%m-01) \
-    --end-date $(date -u +%Y-%m-%d) \
-    --query "[?consumedService=='Storage' && unitOfMeasure=='GB'].{Account:instanceName, Month:usageStart, GB:usageQuantity}" \
-    -o tsv | sort -k2
