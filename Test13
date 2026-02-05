@@ -1,34 +1,31 @@
 #!/bin/bash
 
-# 1. Define Subscription
+# 1. Set your Sub ID
 SUB_ID="your-subscription-id-here"
 az account set --subscription "$SUB_ID"
 
-# 2. Get list of IDs into an array
-mapfile -t id_list < <(az storage account list --query "[].id" -o tsv)
+# 2. Get your 4 Storage Account IDs
+ids=$(az storage account list --query "[].id" -o tsv)
 
 echo -e "AccountName\tDate\tUsage_GB"
+echo "------------------------------------------------"
 
-for id in "${id_list[@]}"
+for id in $ids
 do
-    # Get the short name for display
-    name=$(echo "$id" | awk -F'/' '{print $NF}')
+    accountName=$(echo $id | awk -F'/' '{print $NF}')
     
-    # Generate ISO Date (Compatible with most Linux/Cloud Shell environments)
-    # If on macOS, change -d "30 days ago" to -v-30d
-    START=$(date -u -d "30 days ago" +%Y-%m-%dT00:00:00Z)
-
-    # Fetch data - explicitly defining namespace and metric
-    # We use -o json here because it is more stable than tsv for parsing errors
-    usage_data=$(az monitor metrics list \
+    # Using --offset 30d is much safer than 'date' commands across different OS
+    # We use -o json to ensure we capture the data correctly
+    az monitor metrics list \
         --resource "$id" \
-        --namespace "Microsoft.Storage/storageAccounts" \
         --metric "UsedCapacity" \
+        --namespace "Microsoft.Storage/storageAccounts" \
+        --offset 30d \
         --interval "PT24H" \
-        --start-time "$START" \
-        --query "value[0].timeseries[0].data" \
-        -o json)
-
-    # Parse the JSON and convert to GB
-    echo "$usage_data" | jq -r ".[] | \"$name\t\(.timeStamp)\t\(.average)\"" | awk '{printf "%s\t%s\t%.2f\n", $1, $2, $3/1073741824}'
+        --query "value[0].timeseries[0].data[?average != null].{T:timeStamp, V:average}" \
+        -o tsv | while read -r time val; do
+            # Convert bytes to GB using awk
+            gb=$(awk "BEGIN {printf \"%.2f\", $val/1073741824}")
+            echo -e "$accountName\t$time\t$gb"
+        done
 done
