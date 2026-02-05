@@ -1,6 +1,10 @@
 #!/bin/bash
 
-# Paste your 4 Resource IDs inside the brackets separated by spaces
+# 1. Your Subscription
+SUB_ID="your-subscription-id-here"
+az account set --subscription "$SUB_ID"
+
+# 2. Your Resource IDs (Manual list to ensure stability)
 RESOURCES=(
 "/subscriptions/.../resourceGroups/.../providers/Microsoft.Storage/storageAccounts/acct1"
 "/subscriptions/.../resourceGroups/.../providers/Microsoft.Storage/storageAccounts/acct2"
@@ -13,19 +17,18 @@ echo "------------------------------------------------"
 
 for id in "${RESOURCES[@]}"
 do
-    # Get the account name from the end of the string
     name=$(echo "$id" | awk -F'/' '{print $NF}')
 
-    # We use --offset 30d to get daily metrics for the last month
-    # We use -o tsv for a clean output
+    # We use PT1H (1 hour) because almost all accounts support it.
+    # Then we use 'grep' to grab only the midnight (00:00) reading for each day.
     az monitor metrics list \
         --resource "$id" \
         --metric "UsedCapacity" \
-        --interval "PT24H" \
+        --interval "PT1H" \
         --offset 30d \
         --query "value[0].timeseries[0].data[?average != null].{T:timeStamp, V:average}" \
-        -o tsv | while read -r time val; do
-            # Math: Bytes to GB
+        -o tsv | grep "T00:00:00Z" | while read -r time val; do
+            # Convert Bytes to GB
             gb=$(awk "BEGIN {printf \"%.2f\", $val/1073741824}")
             echo -e "$name\t$time\t$gb"
         done
