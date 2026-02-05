@@ -1,27 +1,32 @@
 #!/bin/bash
 
-# 1. Define your Subscription ID
-SUB_ID="your-subscription-id-here"
-az account set --subscription "$SUB_ID"
-
-# 2. Get all storage account IDs
-ids=$(az storage account list --query "[].id" -o tsv)
+# Paste your 4 Resource IDs inside the brackets separated by spaces
+RESOURCES=(
+"/subscriptions/.../resourceGroups/.../providers/Microsoft.Storage/storageAccounts/acct1"
+"/subscriptions/.../resourceGroups/.../providers/Microsoft.Storage/storageAccounts/acct2"
+"/subscriptions/.../resourceGroups/.../providers/Microsoft.Storage/storageAccounts/acct3"
+"/subscriptions/.../resourceGroups/.../providers/Microsoft.Storage/storageAccounts/acct4"
+)
 
 echo -e "AccountName\tDate\tUsage_GB"
 echo "------------------------------------------------"
 
-for id in $ids
+for id in "${RESOURCES[@]}"
 do
-    accountName=$(echo $id | awk -F'/' '{print $NF}')
-    
-    # We use --offset 30d to avoid the date parsing error.
-    # We filter for records where average usage is not null.
+    # Get the account name from the end of the string
+    name=$(echo "$id" | awk -F'/' '{print $NF}')
+
+    # We use --offset 30d to get daily metrics for the last month
+    # We use -o tsv for a clean output
     az monitor metrics list \
         --resource "$id" \
         --metric "UsedCapacity" \
-        --namespace "Microsoft.Storage/storageAccounts" \
-        --offset 30d \
         --interval "PT24H" \
-        --query "value[0].timeseries[0].data[?average != null]" \
-        -o json | jq -r ".[] | \"$accountName\t\(.timeStamp)\t\(.average)\"" | awk '{printf "%s\t%s\t%.2f\n", $1, $2, $3/1073741824}'
+        --offset 30d \
+        --query "value[0].timeseries[0].data[?average != null].{T:timeStamp, V:average}" \
+        -o tsv | while read -r time val; do
+            # Math: Bytes to GB
+            gb=$(awk "BEGIN {printf \"%.2f\", $val/1073741824}")
+            echo -e "$name\t$time\t$gb"
+        done
 done
