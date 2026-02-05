@@ -1,28 +1,34 @@
 #!/bin/bash
 
-# 1. Define your Subscription ID
+# 1. Define Subscription
 SUB_ID="your-subscription-id-here"
 az account set --subscription "$SUB_ID"
 
-# 2. Get all storage account IDs
-ids=$(az storage account list --query "[].id" -o tsv)
+# 2. Get list of IDs into an array
+mapfile -t id_list < <(az storage account list --query "[].id" -o tsv)
 
 echo -e "AccountName\tDate\tUsage_GB"
 
-for id in $ids
+for id in "${id_list[@]}"
 do
-    # Extract name for the display
-    accountName=$(echo $id | awk -F'/' '{print $NF}')
+    # Get the short name for display
+    name=$(echo "$id" | awk -F'/' '{print $NF}')
     
-    # 3. Use the full $id variable for the --resource flag
-    # This avoids the "Resource Name/Type/Namespace" error
-    START_DATE=$(date -u -d "30 days ago" +%Y-%m-%dT00:00:00Z)
+    # Generate ISO Date (Compatible with most Linux/Cloud Shell environments)
+    # If on macOS, change -d "30 days ago" to -v-30d
+    START=$(date -u -d "30 days ago" +%Y-%m-%dT00:00:00Z)
 
-    az monitor metrics list \
+    # Fetch data - explicitly defining namespace and metric
+    # We use -o json here because it is more stable than tsv for parsing errors
+    usage_data=$(az monitor metrics list \
         --resource "$id" \
+        --namespace "Microsoft.Storage/storageAccounts" \
         --metric "UsedCapacity" \
         --interval "PT24H" \
-        --start-time "$START_DATE" \
-        --query "value[0].timeseries[0].data[].{Date:timeStamp, Usage:average}" \
-        -o tsv | awk -v acc="$accountName" '$2 != "" {printf "%s\t%s\t%.2f\n", acc, $1, $2/1073741824}'
+        --start-time "$START" \
+        --query "value[0].timeseries[0].data" \
+        -o json)
+
+    # Parse the JSON and convert to GB
+    echo "$usage_data" | jq -r ".[] | \"$name\t\(.timeStamp)\t\(.average)\"" | awk '{printf "%s\t%s\t%.2f\n", $1, $2, $3/1073741824}'
 done
