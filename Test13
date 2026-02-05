@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# 1. Set your Sub ID
+# 1. Define your Subscription ID
 SUB_ID="your-subscription-id-here"
 az account set --subscription "$SUB_ID"
 
-# 2. Get your 4 Storage Account IDs
+# 2. Get all storage account IDs
 ids=$(az storage account list --query "[].id" -o tsv)
 
 echo -e "AccountName\tDate\tUsage_GB"
@@ -14,18 +14,14 @@ for id in $ids
 do
     accountName=$(echo $id | awk -F'/' '{print $NF}')
     
-    # Using --offset 30d is much safer than 'date' commands across different OS
-    # We use -o json to ensure we capture the data correctly
+    # We use --offset 30d to avoid the date parsing error.
+    # We filter for records where average usage is not null.
     az monitor metrics list \
         --resource "$id" \
         --metric "UsedCapacity" \
         --namespace "Microsoft.Storage/storageAccounts" \
         --offset 30d \
         --interval "PT24H" \
-        --query "value[0].timeseries[0].data[?average != null].{T:timeStamp, V:average}" \
-        -o tsv | while read -r time val; do
-            # Convert bytes to GB using awk
-            gb=$(awk "BEGIN {printf \"%.2f\", $val/1073741824}")
-            echo -e "$accountName\t$time\t$gb"
-        done
+        --query "value[0].timeseries[0].data[?average != null]" \
+        -o json | jq -r ".[] | \"$accountName\t\(.timeStamp)\t\(.average)\"" | awk '{printf "%s\t%s\t%.2f\n", $1, $2, $3/1073741824}'
 done
