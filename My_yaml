@@ -1,0 +1,11 @@
+- task: Bash@3
+  displayName: "Approve Private Endpoint"
+  inputs:
+    targetType: inline
+    script: |
+      python3 approve_pep.py
+  env:
+    PEP_API_URL: $(PEP_API_URL)
+    PEP_API_TOKEN: $(PEP_API_TOKEN)
+    RESOURCE_ID: $(RESOURCE_ID)
+    PEP_NAME: ${{ parameters.pep_name }}   # ✅ correct way
