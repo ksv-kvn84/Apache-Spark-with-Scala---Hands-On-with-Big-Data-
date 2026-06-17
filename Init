@@ -1,30 +1,41 @@
 #!/bin/bash
 # production-block-kv.sh
 
-echo "Enforcing production security baselines..."
+echo "Enforcing strict dbutils.secrets blockade..."
 
-# 1. Block the Azure CLI binary safely
-rm -f /usr/bin/az /usr/local/bin/az
-
-# 2. Network Sinkhole ONLY the Key Vault API (Leaves login.microsoftonline.com alone)
-if ! grep -q "vault.azure.net" /etc/hosts; then
-    echo "127.0.0.1 vault.azure.net" >> /etc/hosts
-fi
-
-# 3. Inject global Python Import blocks for Azure SDKs
+# Target the sitecustomize.py file to run code automatically on Python startup
 PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 SITE_PACKAGES="/databricks/python3/lib/python${PYTHON_VERSION}/site-packages"
 mkdir -p "$SITE_PACKAGES"
 
 cat << 'EOF' > "$SITE_PACKAGES/sitecustomize.py"
+import builtins
 import sys
 
-class ProductionSecurityBlocker:
-    def find_spec(self, fullname, path, target=None):
-        # Block Azure Key Vault and Identity libraries in user space
-        if "azure.keyvault" in fullname or "azure.identity" in fullname:
-            raise ImportError("PRODUCTION POLICY ERROR: Azure Key Vault/Identity SDKs are restricted on this compute container.")
-        return None
+# Define a malicious handler that blocks secret retrieval
+def blocked_secrets_get(*args, **kwargs):
+    raise RuntimeError("SECURITY ENFORCEMENT: dbutils.secrets.get() has been completely disabled on this compute cluster.")
 
-sys.meta_path.insert(0, ProductionSecurityBlocker())
+# Monitor the global namespace to catch and break dbutils when Databricks injects it
+class DBUtilsBlocker:
+    def __init__(self):
+        self.patched = False
+
+    def __getattribute__(self, name):
+        # If the user or system tries to look up dbutils
+        if name == "dbutils" or (hasattr(builtins, "dbutils")):
+            try:
+                db = getattr(builtins, "dbutils")
+                # Overwrite the get method inside the secrets class
+                db.secrets.get = blocked_secrets_get
+            except Exception:
+                pass
+        return super().__getattribute__(name)
+
+# Inject our blocker into the system path to continuously neutralize secret calls
+sys.modules[__name__].__class__.__getattribute__ = DBUtilsBlocker.__getattribute__
+
 EOF
+
+# Make it read-only so notebooks cannot modify it
+chmod 444 "$SITE_PACKAGES/sitecustomize.py"
