@@ -1,0 +1,30 @@
+#!/bin/bash
+# production-block-kv.sh
+
+echo "Enforcing production security baselines..."
+
+# 1. Block the Azure CLI binary safely
+rm -f /usr/bin/az /usr/local/bin/az
+
+# 2. Network Sinkhole ONLY the Key Vault API (Leaves login.microsoftonline.com alone)
+if ! grep -q "vault.azure.net" /etc/hosts; then
+    echo "127.0.0.1 vault.azure.net" >> /etc/hosts
+fi
+
+# 3. Inject global Python Import blocks for Azure SDKs
+PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+SITE_PACKAGES="/databricks/python3/lib/python${PYTHON_VERSION}/site-packages"
+mkdir -p "$SITE_PACKAGES"
+
+cat << 'EOF' > "$SITE_PACKAGES/sitecustomize.py"
+import sys
+
+class ProductionSecurityBlocker:
+    def find_spec(self, fullname, path, target=None):
+        # Block Azure Key Vault and Identity libraries in user space
+        if "azure.keyvault" in fullname or "azure.identity" in fullname:
+            raise ImportError("PRODUCTION POLICY ERROR: Azure Key Vault/Identity SDKs are restricted on this compute container.")
+        return None
+
+sys.meta_path.insert(0, ProductionSecurityBlocker())
+EOF
