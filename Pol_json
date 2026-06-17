@@ -1,0 +1,27 @@
+{
+  "spark_conf.spark.databricks.security.credentials.provider.override.enabled": {
+    "type": "fixed",
+    "value": "false",
+    "hidden": true
+  },
+  "spark_conf.spark.databricks.repl.allowedLanguages": {
+    "type": "fixed",
+    "value": "python,sql",
+    "hidden": true
+  },
+  "spark_conf.spark.databricks.acl.dfAclsEnabled": {
+    "type": "fixed",
+    "value": "true",
+    "hidden": true
+  },
+  "spark_conf.spark.databricks.secrets.hardLimit": {
+    "type": "fixed",
+    "value": "true",
+    "hidden": true
+  },
+  "init_scripts.0.workspace.destination": {
+    "type": "fixed",
+    "value": "/Shared/init-scripts/production-block-kv.sh",
+    "hidden": true
+  }
+}
